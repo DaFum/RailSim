@@ -37,7 +37,7 @@ export function initRailSim(container) {
   const trainGeometry = new THREE.BoxGeometry(0.5, 0.5, 1);
   const trainMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
   function createTrain() {
-    const mesh = new THREE.Mesh(trainGeometry, trainMaterial);
+    const mesh = new THREE.Mesh(trainGeometry, trainMaterial.clone());
     mesh.position.set(-trackLength / 2, 0.3, 0);
     scene.add(mesh);
     trains.push({ mesh, direction: 1 });
