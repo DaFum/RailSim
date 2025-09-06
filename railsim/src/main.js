@@ -107,7 +107,7 @@ export function initRailSim(container) {
         break;
     }
   }
-  window.addEventListener('keydown', onKeyDown);
+  container.addEventListener('keydown', onKeyDown);
 
   // Train management UI controls
   const ui = document.createElement('div');
