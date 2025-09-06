@@ -53,7 +53,7 @@ export function initRailSim(container) {
   }
 
   function animate() {
-    requestAnimationFrame(animate);
+    animationFrameId = requestAnimationFrame(animate);
     if (isMoving) {
       for (const t of trains) {
         t.mesh.position.x += trainSpeed * t.direction;
