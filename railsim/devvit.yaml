@@ -1,0 +1,5 @@
+name: railsim
+
+#1 Actual updates: added minimal Devvit config for playtesting.
+#2 Next steps: include full metadata like description and version.
+#3 Found errors + solutions: playtest failed without devvit.yaml -> added file.
