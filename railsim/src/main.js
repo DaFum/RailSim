@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+/**
+ * Initialisiert eine einfache Three.js-Bahn-Simulation in einem DOM-Container.
+ *
+ * Erstellt Szene, Kamera, Renderer, ein doppeltes Gleis und mindestens einen Zug; startet die Animationsschleife,
+ * bindet Fenster- und Tastatur-Handler und fügt eine kleine UI (Pause/Start, Geschwindigkeit, "Add Train") in den Container ein.
+ *
+ * @param {HTMLElement} container - DOM-Element, in das Renderer-Canvas und UI eingefügt werden. Muss sichtbare (nicht-null) Breite und Höhe haben.
+ * @returns {{ dispose: function }} Ein Objekt mit einer dispose()-Funktion, die alle Listener entfernt, Three.js-Ressourcen freigibt und erzeugte DOM-Elemente entfernt.
+ * @throws {Error} Wenn kein Container übergeben wurde oder der Container eine Breite/Höhe von 0 hat.
+ */
 export function initRailSim(container) {
   if (!container) {
     throw new Error('Container element not provided');
