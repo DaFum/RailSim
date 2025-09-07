@@ -1,0 +1,261 @@
+name: Gemini PR Automation
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  gemini-pr-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure jq is available
+        run: |
+          set -e
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+          jq --version
+
+      - name: Check Gemini API key
+        id: check_secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "::notice::GEMINI_API_KEY not found. Skipping Gemini review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare PR review input
+        id: diff_check
+        if: steps.check_secrets.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          PR_NUMBER="$(jq -r '.number' "$GITHUB_EVENT_PATH")"
+          PR_TITLE="$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")"
+          PR_BODY="$(jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH")"
+          PR_AUTHOR="$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")"
+          PR_URL="$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")"
+          BASE_REF="$(jq -r '.pull_request.base.ref' "$GITHUB_EVENT_PATH")"
+          HEAD_REF="$(jq -r '.pull_request.head.ref' "$GITHUB_EVENT_PATH")"
+          BASE_SHA="$(jq -r '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
+          HEAD_SHA="$(jq -r '.pull_request.head.sha' "$GITHUB_EVENT_PATH")"
+          DIFF_URL="$(jq -r '.pull_request.diff_url' "$GITHUB_EVENT_PATH")"
+
+          API="https://api.github.com/repos/${REPO}"
+
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.v3.diff" \
+            "$DIFF_URL" > pr_diff_full.txt
+
+          if [ ! -s pr_diff_full.txt ]; then
+            echo "::notice::No diff to review. Skipping Gemini review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          cp pr_diff_full.txt pr_diff.txt
+
+          echo "::group::Gemini input meta"
+          echo "Bytes: $(wc -c < pr_diff.txt)"
+          echo "SHA256: $(sha256sum pr_diff.txt | cut -d' ' -f1)"
+          echo "::endgroup::"
+
+          # fetch_paginated: Fetches paginated results from a GitHub API endpoint.
+          # Parameters:
+          #   $1 (endpoint): The API endpoint (relative to $API) to fetch.
+          #   $2 (output): The file to write the concatenated JSON objects to.
+          # Returns:
+          #   0 on success, 1 on error (if a non-200 HTTP status is returned).
+          fetch_paginated() {
+            local endpoint="$1"
+            local output="$2"
+  
+            if ! touch "$output" 2>/dev/null; then
+              echo "::error::Cannot write to output file: $output"
+              return 1
+            fi
+            : > "$output"
+  
+            local page=1
+            while true; do
+              resp_and_code="$(curl -sSL -w '\n%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "$API/$endpoint?per_page=100&page=$page")"
+              resp="$(printf '%s' "$resp_and_code" | sed '$d')"
+              status="$(printf '%s' "$resp_and_code" | tail -n1)"
+              if [ "$status" -ne 200 ]; then
+                echo "::error::Failed to fetch GitHub API $endpoint (page $page): HTTP $status"
+                return 1
+              fi
+              if ! count="$(printf '%s' "$resp" | jq 'length' 2>/dev/null)"; then
+                echo "::error::Invalid JSON response from GitHub API for $endpoint (page $page)"
+                return 1
+              fi
+              [ "$count" -eq 0 ] && break
+              printf '%s\n' "$resp" | jq -c '.[]' >> "$output"
+              page=$((page+1))
+            done
+          }
+
+          if ! fetch_paginated "pulls/$PR_NUMBER/files" pr_files.json; then
+            echo "::error::Failed to fetch PR files"
+            exit 1
+          fi
+
+          jq -rs '.[] | "\(.status)\t\(.filename)\t(+\(.additions) -\(.deletions))"' pr_files.json > pr_files.txt
+
+          total_add=$(jq -s '[.[].additions] | add // 0' pr_files.json)
+          total_del=$(jq -s '[.[].deletions] | add // 0' pr_files.json)
+          count_files=$(jq -s 'length' pr_files.json)
+          {
+            echo "Files changed: $count_files, insertions(+): $total_add, deletions(-): $total_del"
+            jq -rs '.[] | "\(.filename): +\(.additions) -\(.deletions)"' pr_files.json
+          } > pr_diffstat.txt
+
+          fetch_paginated "pulls/$PR_NUMBER/commits" pr_commits.json
+
+          jq -rs '.[] | "\(.sha[0:7]) \(.commit.author.date) \(.commit.author.name) - \(.commit.message | gsub("\\n"; " "))"' \
+            pr_commits.json > pr_commits.txt
+
+          {
+            echo "# Review context"
+            echo "PR: #$PR_NUMBER - $PR_TITLE"
+            echo "Author: @$PR_AUTHOR"
+            echo "URL: $PR_URL"
+            echo "Repository: $REPO"
+            echo "Base: $BASE_REF ($BASE_SHA)"
+            echo "Head: $HEAD_REF ($HEAD_SHA)"
+            echo
+            echo "## PR Description"
+            printf "%s\n" "$PR_BODY"
+            echo
+            echo "## Commit History ($BASE_SHA..$HEAD_SHA)"
+            cat pr_commits.txt
+            echo
+            echo "## Changed Files (status, path, +/-)"
+            cat pr_files.txt
+            echo
+            echo "## Diffstat"
+            cat pr_diffstat.txt
+            echo
+            echo "## Unified Diff"
+            cat pr_diff_full.txt
+          } > pr_review_input.txt
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Run Gemini review
+        id: review
+        if: steps.check_secrets.outputs.skip != 'true' && steps.diff_check.outputs.skip != 'true'
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CI: true
+          NODE_NO_WARNINGS: 1
+        run: |
+          set -euo pipefail
+          RAW_RESPONSE=$(npx --yes @google/gemini-cli@0.3.2 \
+          --yolo \
+          --prompt-interactive <<EOF
+
+          You are an expert software architect and senior code reviewer. Your task is to provide a comprehensive, objective, and constructive review of the current pull request. Your feedback must be highly structured and actionable, following best practices for professional code reviews.
+
+          Your review must be formatted as follows, using Markdown for clear presentation:
+
+          ### 🎯 Executive Summary
+          - A concise, one-to-two-sentence summary of the overall quality and purpose of the changes. State whether the changes are ready for a final review or require significant rework.
+
+          ### ✅ Required Changes (Blocking)
+          - **Bugs & Critical Issues:** List all logical errors, unexpected behaviors, and potential crashes.
+          - **Security Vulnerabilities:** Identify any security flaws, such as injection vulnerabilities, improper data handling, or weak cryptographic practices.
+          - **Architectural Integrity:** Does this change break the established design patterns or architecture of the project? Provide a clear rationale.
+
+          ### 💡 Suggestions & Improvements (Non-Blocking)
+          - **Code Quality & Readability:** Offer suggestions for refactoring, simplifying complex logic, or improving variable naming to enhance long-term maintainability.
+          - **Performance & Scalability:** Highlight potential performance bottlenecks and propose more efficient algorithms or data structures.
+          - **Testing & Edge Cases:** Suggest additional unit, integration, or end-to-end tests that would increase code robustness. Identify any edge cases that are not currently handled.
+
+          ### 📖 Documentation
+          - Is the code well-commented? Are docstrings present for public functions and classes?
+          - Does the PR require an an update to the project's external documentation (e.g., README, API docs)?
+
+          ### 🤝 Final Verdict
+          - A clear final statement. Choose one of the following:
+                - **Approval:** The PR is ready to merge as is.
+                - **Changes Requested:** The PR requires further work based on the feedback in the "Required Changes" section.
+                - **Comment:** The feedback is for discussion and does not block the PR.
+                
+          Now review the following PR context and produce a concise, actionable code review.
+
+          "$(cat pr_review_input.txt)"
+          EOF
+          2>&1 || true)
+          RESPONSE=$(printf "%s" "$RAW_RESPONSE" | perl -pe 's/\e\[[\d;]*[A-Za-z]//g' | tr -d '\r')
+          {
+            echo "gemini_response<<EOF"
+            printf "%s\n" "$RESPONSE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post PR Review Comment
+        if: success() && steps.check_secrets.outputs.skip != 'true' && steps.diff_check.outputs.skip != 'true' && steps.review.outputs.gemini_response != ''
+        uses: actions/github-script@v7
+        env:
+          GEMINI_RESPONSE: ${{ steps.review.outputs.gemini_response }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : context.issue.number;
+            const body = `### Gemini Review\n\n${process.env.GEMINI_RESPONSE}\n\n---\nGenerated by [workflow run](${process.env.RUN_URL})`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
+
+      - name: Post PR review as comment on failure
+        if: steps.check_secrets.outputs.skip != 'true' && steps.diff_check.outputs.skip != 'true' && steps.review.outputs.gemini_response == ''
+        uses: actions/github-script@v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : context.issue.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body: ':warning: Gemini review skipped: model unavailable or CLI failure. See the Actions tab for details: ' +
+                process.env.RUN_URL
+            });
