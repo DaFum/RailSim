@@ -4,7 +4,7 @@
   "description": "RailSim Devvit app",
   "main": "src/main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "dev": "devvit playtest"
   },
   "keywords": [],
@@ -14,5 +14,9 @@
   "dependencies": {
     "devvit": "^0.12.0",
     "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
   }
 }
