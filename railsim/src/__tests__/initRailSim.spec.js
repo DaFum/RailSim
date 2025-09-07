@@ -188,7 +188,7 @@ describe('initRailSim', () => {
   });
 
   test('multi-train support: Add Train adds trains and they animate within track bounds', async () => {
-    const THREE = (await import('three')).__REGISTRY;
+    const registry = THREE.__REGISTRY;
 
     const c = makeContainer();
     const { dispose } = initRailSim(c);
