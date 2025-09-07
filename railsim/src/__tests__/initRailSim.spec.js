@@ -1,5 +1,5 @@
 /**
- * Tests for initRailSim in railsim/src/main.test.js
+ * Tests for initRailSim in railsim/src/main.js
  * Framework: Jest + jsdom (no new dependencies introduced).
  * We mock three.js and OrbitControls to make rendering side-effect-free and observable.
  */
@@ -132,18 +132,18 @@ function makeContainer(w = 800, h = 600) {
 
 describe('initRailSim', () => {
   test('throws when container is missing', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     expect(() => initRailSim()).toThrow(/Container element not provided/);
   });
 
   test('throws when container has zero width/height', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     const c = makeContainer(0, 0);
     expect(() => initRailSim(c)).toThrow(/Container must have non-zero width and height/);
   });
 
   test('initializes renderer canvas and UI controls, and toggles Pause/Start', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     const THREE = (await import('three')).__REGISTRY;
     const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 
@@ -174,7 +174,7 @@ describe('initRailSim', () => {
   });
 
   test('multi-train support: Add Train adds trains and they animate within track bounds', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     const THREE = (await import('three')).__REGISTRY;
 
     const c = makeContainer();
@@ -215,7 +215,7 @@ describe('initRailSim', () => {
   });
 
   test('resize handler updates camera aspect and renderer size; no updates when width/height become 0', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     const THREE = await import('three');
 
     const c = makeContainer(640, 480);
@@ -242,7 +242,7 @@ describe('initRailSim', () => {
   });
 
   test('dispose removes UI and canvas, disposes controls/renderer and rail/train resources', async () => {
-    const { initRailSim } = await import('../main.test.js');
+    const { initRailSim } = await import('../main.js');
     const THREE = await import('three');
     const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 
