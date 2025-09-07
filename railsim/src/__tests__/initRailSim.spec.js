@@ -1,8 +1,10 @@
 /**
- * Tests for initRailSim in railsim/src/main.test.js
+ * Tests for initRailSim in railsim/src/main.js
  * Framework: Jest + jsdom (no new dependencies introduced).
  * We mock three.js and OrbitControls to make rendering side-effect-free and observable.
  */
+
+import { describe, test, expect, jest, beforeAll, beforeEach, afterEach } from '@jest/globals';
 
 jest.useFakeTimers();
 
@@ -14,110 +16,124 @@ function setRAF() {
 
 beforeEach(() => {
   document.body.innerHTML = "";
-  jest.resetModules();
   jest.clearAllTimers();
   setRAF();
+  const reg = THREE.__REGISTRY;
+  reg.materials.length = 0;
+  reg.geometries.length = 0;
+  reg.meshes.length = 0;
+  reg.scenes.length = 0;
+  reg.renderers.length = 0;
 });
 
 afterEach(() => {
   jest.clearAllMocks();
 });
 
-jest.mock('three', () => {
-  const registry = {
-    materials: [],
-    geometries: [],
-    meshes: [],
-    scenes: [],
-    renderers: [],
-  };
+let initRailSim;
+let THREE;
+let OrbitControls;
 
-  class MeshBasicMaterial {
-    constructor(opts = {}) {
-      this.color = opts.color;
-      this.disposed = false;
-      this.dispose = jest.fn(() => { this.disposed = true; });
-      registry.materials.push(this);
-    }
-    clone() {
-      return new MeshBasicMaterial({ color: this.color });
-    }
-  }
+beforeAll(async () => {
+  await jest.unstable_mockModule('three', () => {
+    const registry = {
+      materials: [],
+      geometries: [],
+      meshes: [],
+      scenes: [],
+      renderers: [],
+    };
 
-  class BoxGeometry {
-    constructor(a, b, c) {
-      this.args = [a, b, c];
-      this.disposed = false;
-      this.dispose = jest.fn(() => { this.disposed = true; });
-      registry.geometries.push(this);
+    class MeshBasicMaterial {
+      constructor(opts = {}) {
+        this.color = opts.color;
+        this.disposed = false;
+        this.dispose = jest.fn(() => { this.disposed = true; });
+        registry.materials.push(this);
+      }
+      clone() {
+        return new MeshBasicMaterial({ color: this.color });
+      }
     }
-  }
 
-  class Mesh {
-    constructor(geometry, material) {
-      this.geometry = geometry;
-      this.material = material;
-      this.position = {
-        x: 0, y: 0, z: 0,
-        set: (x, y, z) => { this.position.x = x; this.position.y = y; this.position.z = z; }
-      };
+    class BoxGeometry {
+      constructor(a, b, c) {
+        this.args = [a, b, c];
+        this.disposed = false;
+        this.dispose = jest.fn(() => { this.disposed = true; });
+        registry.geometries.push(this);
+      }
     }
-    clone() {
-      return new Mesh(this.geometry, this.material);
+
+    class Mesh {
+      constructor(geometry, material) {
+        this.geometry = geometry;
+        this.material = material;
+        this.position = {
+          x: 0, y: 0, z: 0,
+          set: (x, y, z) => { this.position.x = x; this.position.y = y; this.position.z = z; }
+        };
+      }
+      clone() {
+        return new Mesh(this.geometry, this.material);
+      }
     }
-  }
 
-  class Scene {
-    constructor() {
-      this.objects = new Set();
-      registry.scenes.push(this);
+    class Scene {
+      constructor() {
+        this.objects = new Set();
+        registry.scenes.push(this);
+      }
+      add(obj) { this.objects.add(obj); }
+      remove(obj) { this.objects.delete(obj); }
     }
-    add(obj) { this.objects.add(obj); }
-    remove(obj) { this.objects.delete(obj); }
-  }
 
-  class PerspectiveCamera {
-    constructor() {
-      this.position = { z: 0 };
-      this.aspect = 1;
-      this.updateProjectionMatrix = jest.fn();
+    class PerspectiveCamera {
+      constructor() {
+        this.position = { z: 0 };
+        this.aspect = 1;
+        this.updateProjectionMatrix = jest.fn();
+      }
     }
-  }
 
-  class WebGLRenderer {
-    constructor() {
-      this.domElement = (() => {
-        const c = document.createElement('canvas');
-        c.getContext = () => ({});
-        return c;
-      })();
-      this.setSize = jest.fn();
-      this.render = jest.fn();
-      this.dispose = jest.fn();
-      registry.renderers.push(this);
+    class WebGLRenderer {
+      constructor() {
+        this.domElement = (() => {
+          const c = document.createElement('canvas');
+          c.getContext = () => ({});
+          return c;
+        })();
+        this.setSize = jest.fn();
+        this.render = jest.fn();
+        this.dispose = jest.fn();
+        registry.renderers.push(this);
+      }
     }
-  }
 
-  return {
-    __esModule: true,
-    Scene,
-    PerspectiveCamera,
-    WebGLRenderer,
-    MeshBasicMaterial,
-    BoxGeometry,
-    Mesh,
-    // Helpful registry for assertions
-    __REGISTRY: registry,
-  };
-});
+    return {
+      __esModule: true,
+      Scene,
+      PerspectiveCamera,
+      WebGLRenderer,
+      MeshBasicMaterial,
+      BoxGeometry,
+      Mesh,
+      __REGISTRY: registry,
+    };
+  });
 
-jest.mock('three/examples/jsm/controls/OrbitControls.js', () => {
-  const OrbitControls = jest.fn().mockImplementation(() => ({
-    enableDamping: true,
-    update: jest.fn(),
-    dispose: jest.fn(),
-  }));
-  return { __esModule: true, OrbitControls };
+  await jest.unstable_mockModule('three/examples/jsm/controls/OrbitControls.js', () => {
+    const OrbitControls = jest.fn().mockImplementation(() => ({
+      enableDamping: true,
+      update: jest.fn(),
+      dispose: jest.fn(),
+    }));
+    return { __esModule: true, OrbitControls };
+  });
+
+  ({ initRailSim } = await import('../main.js'));
+  THREE = await import('three');
+  ({ OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js'));
 });
 
 function makeContainer(w = 800, h = 600) {
@@ -131,19 +147,17 @@ function makeContainer(w = 800, h = 600) {
 }
 
 describe('initRailSim', () => {
-  test('throws when container is missing', async () => {
-    const { initRailSim } = await import('../main.test.js');
+
+  test('throws when container is missing', () => {
     expect(() => initRailSim()).toThrow(/Container element not provided/);
   });
 
-  test('throws when container has zero width/height', async () => {
-    const { initRailSim } = await import('../main.test.js');
+  test('throws when container has zero width/height', () => {
     const c = makeContainer(0, 0);
     expect(() => initRailSim(c)).toThrow(/Container must have non-zero width and height/);
   });
 
   test('initializes renderer canvas and UI controls, and toggles Pause/Start', async () => {
-    const { initRailSim } = await import('../main.test.js');
     const THREE = (await import('three')).__REGISTRY;
     const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 
@@ -174,8 +188,7 @@ describe('initRailSim', () => {
   });
 
   test('multi-train support: Add Train adds trains and they animate within track bounds', async () => {
-    const { initRailSim } = await import('../main.test.js');
-    const THREE = (await import('three')).__REGISTRY;
+    const registry = THREE.__REGISTRY;
 
     const c = makeContainer();
     const { dispose } = initRailSim(c);
@@ -215,7 +228,6 @@ describe('initRailSim', () => {
   });
 
   test('resize handler updates camera aspect and renderer size; no updates when width/height become 0', async () => {
-    const { initRailSim } = await import('../main.test.js');
     const THREE = await import('three');
 
     const c = makeContainer(640, 480);
@@ -242,7 +254,6 @@ describe('initRailSim', () => {
   });
 
   test('dispose removes UI and canvas, disposes controls/renderer and rail/train resources', async () => {
-    const { initRailSim } = await import('../main.test.js');
     const THREE = await import('three');
     const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 

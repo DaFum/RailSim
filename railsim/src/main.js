@@ -62,6 +62,7 @@ export function initRailSim(container) {
     mesh.position.x = Math.max(Math.min(mesh.position.x, trackLength / 2), -trackLength / 2);
   }
 
+  let animationFrameId;
   function animate() {
     animationFrameId = requestAnimationFrame(animate);
     if (isMoving) {
