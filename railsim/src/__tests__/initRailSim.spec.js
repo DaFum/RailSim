@@ -99,7 +99,7 @@ beforeAll(async () => {
     class WebGLRenderer {
       constructor() {
         this.domElement = (() => {
-          const c = globalThis.document.createElement('canvas');
+          const c = document.createElement('canvas');
           c.getContext = () => ({});
           return c;
         })();
